@@ -27,3 +27,11 @@
  - 使用《結巴》中文分詞組件，參考 https://github.com/fxsjy/jieba
  - ./dict.txt 
  - 字詞 詞頻 分類
+
+## 小感
+
+ - 如果還可以用 innd(7777) 就不用那麼暴力和麻煩
+ - 想做中文自然語法處理方面的事，認真點就看看 https://www.zhihu.com/question/19929473
+ - 想知道點英詞世界的 NLP 基本邏輯，看 
+ - https://zh-tw.coursera.org/course/nlp
+ - https://zh-tw.coursera.org/course/nlangp

@@ -1,0 +1,152 @@
+#!/usr/local/bin/node
+
+var request = require('request');
+var cheerio = require('cheerio');
+var fs = require('fs');
+var arg = process.argv.slice(2);
+var req_headers = {'User-Agent':"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/46.9.2490.86 Safari/537.36"};
+var target = "https://www.ptt.cc/bbs/";
+
+var tokenizor = require("nodejieba");
+tokenizor.load({dict:'./dict.txt'});
+
+var delay = 0;
+var board = arg[0] || 'politics';
+
+/* 導入部份，按參數 1 指定看板，從 index 知道最後一頁的頁數，這裹沒有做足夠的防誤。 */
+
+request({url:target+board+'/',headers:req_headers},function(e,r,html){
+ if(!e && r.statusCode == 200) {
+
+  var $ = cheerio.load(html);
+  /* get link of last - 1 page as in index.html */
+  var lastpage = $('.btn-group.pull-right a')[1].attribs.href;
+
+  /* cut the number part and get lastpage number */
+  var lastpage_no = parseInt(/(\d)+\.html$/.exec(lastpage)[0],10) + 1;
+  //console.log(lastpage_no);
+
+ }else console.log(e,r.statusCode);
+
+ var MaxPage = arg[1] || 10;
+ if(MaxPage > lastpage_no) MaxPage = lastpage;
+ for(page=lastpage_no;page>lastpage_no-MaxPage;page--){
+   get_links(page);
+ }
+
+});
+
+/* 疏理文章的連結。即是在爬... 而且沒有理會 推薦數、板主保留(M)等資料
+   留意這裹用了不可靠的順序比較去除掉置底文。 */
+
+var get_links = function(page){
+  request({url:target+board+'/index'+page+'.html',headers:req_headers},function(e,r,html){
+
+  if(!e && r.statusCode == 200){
+    var $ = cheerio.load(html);
+    var curlink = "";
+    $('.r-list-container div a').each(function(i,el){
+      var href = el.attribs.href.substr(5);
+      if(curlink > href) return;
+      curlink = href;
+
+      /* 跑太快的話，會出現 503 代表 ptt web 伺服器吃不消在哭哭，不要欺負人啦。 */
+      setTimeout(function(){get_context(href);},delay*100);
+      delay++;
+    })
+  }else console.log('pageError',e,r.statusCode,page);
+ })
+}
+
+/* 讀取文章內容。
+   沒有理會標題、作者、日期、簽名檔、推文等等... 反正為了示範一切從簡 
+   正常來說這些資要放到 local 緩存，那就不用暴力爬文了。
+   */
+
+
+var get_context = function(link){
+  request({url:target+link,headers:req_headers},function(e,r,html){
+    if(!e && r.statusCode == 200){
+       var $ = cheerio.load(html);
+       var children = $('#main-content')[0].children;
+       for(child in children){
+        if(children[child].type != 'text') continue
+        var text = children[child].data.split('\n');
+        var main_text = "";
+        for(t in text){
+          if (text[t] == "--") break;
+          main_text += text[t];
+        }
+        analysis(main_text);
+       }
+    }else console.log('pageError',e,r.statusCode,link);
+  })
+}
+
+/* 拆詞 */
+
+
+var analysis = function(text){
+  result = tokenizor.tag(text);
+  merge(result);
+}
+
+/* 綜合分析 */
+
+var repo = {};
+var cnt = {kmt:0,dpp:0,uni:0};
+
+var merge = function(obj){
+
+
+  /* 這裹開始改變數名都比較懶了，應該修正到更易讀 */
+
+   /* 疏理內文分類比重 */
+  var inner =  {kmt:0,dpp:0,uni:0};
+
+   /* 疏理正負面詞比重 */
+  var pn = {pos:0,neg:0};
+
+  for(e in obj){
+    var o = obj[e].split(':');
+    var i = o[0];
+    var j = o[1];
+    switch(j){
+     case 'pos':
+     case 'neg':
+      pn[j]++;  
+      continue;
+     case 'kmt':
+     case 'dpp':
+     case 'uni':
+      inner[j]++;
+      break;
+     default:
+      continue;
+    }
+
+    if(!repo[i]){
+       repo[i] = 1;
+    }else{
+       repo[i]++;
+    }
+  }
+
+  /* 沒有管理同義詞 */
+  /* 沒有智慧和訓練可言，若認真一點可以架一個 bp rnn */
+  var point = (pn.pos >= pn.neg) ? 1 : -1;
+  for(cat in cnt){
+    cnt[cat] += point * inner[cat];
+  }
+}
+
+
+   /* 當所有異步工作完成，才把結算印出 */
+
+process.on('exit',function(){
+  console.log('名詞出現次數:');
+  console.log(repo);
+  console.log('正負面評分:');
+  console.log(cnt);
+  process.exit();
+})
